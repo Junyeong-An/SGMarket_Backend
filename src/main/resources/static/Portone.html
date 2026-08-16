@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>PortOne(아임포트) 결제 테스트</title>
+
+    <!-- jQuery (iamport.js 가 내부에서 사용) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- iamport JavaScript SDK -->
+    <script src="https://cdn.iamport.kr/js/iamport.payment-1.2.0.js"></script>
+
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 40px;
+        }
+
+        .wrapper {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        input,
+        button {
+            padding: 8px 10px;
+            margin: 6px 0;
+            width: 100%;
+        }
+
+        #log {
+            white-space: pre-wrap;
+            background: #f7f7f7;
+            padding: 10px;
+            height: 180px;
+            overflow: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrapper">
+        <h2>주문 + 결제 테스트</h2>
+
+        <!-- 1. 주문 생성 -->
+        <label>회원 ID</label>
+        <input id="memberId" type="number" placeholder="로그인한 Member ID 입력" />
+
+        <label>상품 ID</label>
+        <input id="itemId" type="number" placeholder="주문할 Item ID 입력" />
+
+        <label>수량</label>
+        <input id="quantity" type="number" value="1" />
+
+        <button id="btn-order">주문 생성</button>
+
+        <!-- 2. 결제 시작 -->
+        <button id="btn-pay" disabled>결제 진행</button>
+
+        <h3>로그</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const log = (...args) => {
+            const $log = $('#log');
+            $log.append(args.join(' ') + '\n');
+            $log.scrollTop($log[0].scrollHeight);
+            console.log(...args);
+        };
+
+        let orderUid = '';     // 서버에서 내려받은 주문 고유번호
+        let clientCode = '';     // 가맹점 코드
+        let paymentInfo = null;  // PaymentResDto
+
+        /* ========================= 1) 주문 생성 ========================= */
+        $('#btn-order').on('click', async () => {
+            const memberId = $('#memberId').val();
+            const itemId = $('#itemId').val();
+            const qty = $('#quantity').val();
+
+            if (!memberId || !itemId || !qty) {
+                alert('회원 ID / 상품 ID / 수량을 입력하세요'); return;
+            }
+
+            /* 주문 요청 Payload */
+            const body = {
+                memberId,
+                orderItems: [{ itemId, quantity: qty }]
+            };
+
+            try {
+                const res = await fetch('/api/v1/orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const json = await res.json();
+                if (!res.ok) throw json;
+
+                orderUid = json.data.orderUid;
+                log('✅ 주문 생성 성공, orderUid =', orderUid);
+                $('#btn-pay').prop('disabled', false);
+            } catch (err) {
+                log('❌ 주문 생성 실패', err);
+            }
+        });
+
+        /* ========================= 2) 결제 정보 조회 + 3) 결제창 호출 ========================= */
+        $('#btn-pay').on('click', async () => {
+            if (!orderUid) return alert('먼저 주문을 생성하세요.');
+
+            try {
+                const params = new URLSearchParams({ orderUid });
+                const res = await fetch('/payments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                const json = await res.json();
+                if (!res.ok) throw json;
+
+                clientCode = json.data.clientCode;
+                paymentInfo = json.data.paymentInfo;
+
+                log('✅ 결제 정보 수신, clientCode =', clientCode);
+                callIamport(paymentInfo, clientCode);
+            } catch (err) {
+                log('❌ 결제 정보 조회 실패', err);
+            }
+        });
+
+        /* ========================= iamport 결제창 호출 ========================= */
+        function callIamport(info, cCode) {
+            const IMP = window.IMP;
+            IMP.init(cCode);   // 가맹점 식별코드
+
+            IMP.request_pay({
+                pg: 'html5_inicis',
+                pay_method: 'card',
+                merchant_uid: info.orderUid,
+                name: info.productName,
+                amount: info.price,
+                buyer_email: info.buyerEmail,
+                buyer_name: info.buyerNickname,
+                buyer_addr: info.buyerAddress || '',
+            }, async rsp => {
+                if (rsp.success) {
+                    log('💰 결제 성공, imp_uid =', rsp.imp_uid);
+
+                    /* 4) 서버에 결제 결과 콜백 전달 */
+                    try {
+                        const body = new URLSearchParams({
+                            paymentUid: rsp.imp_uid,
+                            orderUid: info.orderUid
+                        });
+                        const res = await fetch('/payments/callback', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: body.toString()
+                        });
+                        const json = await res.json();
+                        if (!res.ok) throw json;
+
+                        log('✅ 서버 검증 완료: ', json.message || '성공');
+                    } catch (e) {
+                        log('❌ 서버 검증 실패', e);
+                    }
+
+                } else {
+                    log('❌ 결제 실패 / 취소', rsp);
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

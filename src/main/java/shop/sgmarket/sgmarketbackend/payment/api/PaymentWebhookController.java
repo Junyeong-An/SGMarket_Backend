@@ -14,9 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import shop.sgmarket.sgmarketbackend.global.error.ErrorCode;
 import shop.sgmarket.sgmarketbackend.global.error.ErrorResponse;
-import shop.sgmarket.sgmarketbackend.global.error.exception.CustomException;
 import shop.sgmarket.sgmarketbackend.payment.api.dto.request.PaymentCallbackReqDto;
 import shop.sgmarket.sgmarketbackend.payment.api.dto.request.PaymentWebhookDto;
 import shop.sgmarket.sgmarketbackend.payment.application.PaymentService;
@@ -46,23 +44,18 @@ public class PaymentWebhookController {
                     content      = @Content(schema = @Schema(implementation = ErrorResponse.class))
             )
     })
-    public ResponseEntity<?> handlePortoneWebhook(
+    public ResponseEntity<Void> handlePortoneWebhook(
             @Parameter(description = "Portone 웹훅 데이터", required = true)
             @RequestBody PaymentWebhookDto webhookDto
     ) {
         log.info("웹훅 수신: {}", webhookDto);
 
-        try {
-            PaymentCallbackReqDto callbackDto = new PaymentCallbackReqDto(
-                    webhookDto.getImpUid(),
-                    webhookDto.getMerchantUid()
-            );
-            paymentService.processPayment(callbackDto);
+        // 콜백과 동일한 검증 로직으로 수렴 — 중복 수신은 processPayment의 멱등 처리에서 걸러진다
+        paymentService.processPayment(new PaymentCallbackReqDto(
+                webhookDto.getImpUid(),
+                webhookDto.getMerchantUid()
+        ));
 
-            return ResponseEntity.ok().build();
-        } catch (Exception e) {
-            log.error("웹훅 처리 중 오류 발생: ", e);
-            throw new CustomException(ErrorCode.PAYMENT_WEBHOOK_ERROR, e.getMessage());
-        }
+        return ResponseEntity.ok().build();
     }
 }

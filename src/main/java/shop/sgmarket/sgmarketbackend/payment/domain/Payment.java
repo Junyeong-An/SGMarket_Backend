@@ -1,5 +1,6 @@
 package shop.sgmarket.sgmarketbackend.payment.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -21,6 +22,8 @@ public class Payment {
 
     private Status status;
 
+    /* 같은 PG 승인 건(imp_uid)이 두 결제에 매핑되는 것을 DB 차원에서 차단하는 최후의 방어선 */
+    @Column(unique = true)
     private String paymentUid;
 
     @Builder
